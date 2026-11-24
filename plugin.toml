@@ -1,0 +1,13 @@
+schema = 1
+id = "github-sidebar"
+name = "GitHub Sidebar"
+version = "0.1.0"
+description = "Click a GitHub pull request link in a terminal and read it in a native sidebar beside the pane."
+icon = "branch"
+host = "host.luau"
+window = "window.luau"
+
+[[blocks]]
+id = "view"
+title = "GitHub pull request"
+icon = "branch"

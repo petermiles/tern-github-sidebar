@@ -1,0 +1,107 @@
+#!/bin/sh
+# A stand-in for the `gh` calls GitHub Sidebar makes, answering with made-up data for one pull request:
+# acme/api#42 "Add token bucket rate limiter" by sam-rivera, with passed, failed and pending checks and one
+# unresolved review thread. Put it first on PATH as `gh` (test/instance.sh does) to try the plugin offline.
+#
+#   FAKE_GH_AUTH=fail   `gh auth status` fails and every other call reports that gh is signed out
+#
+# Any other pull request answers like a missing one. `gh pr checks --watch` prints a line every 10 seconds until it is
+# killed, so the pending check stays pending.
+
+repo=""
+number=""
+prev=""
+for arg in "$@"; do
+	case "$prev" in
+	-R) repo="$arg" ;;
+	esac
+	case "$arg" in
+	[0-9]*) [ -z "$number" ] && number="$arg" ;;
+	esac
+	prev="$arg"
+done
+
+signed_out() {
+	echo "To get started with GitHub CLI, please run:  gh auth login" >&2
+	exit 4
+}
+
+missing() {
+	echo "GraphQL: Could not resolve to a PullRequest with the number of ${number:-0}. (repository.pullRequest)" >&2
+	exit 1
+}
+
+if [ "${FAKE_GH_AUTH:-ok}" = "fail" ] && [ "$1 $2" != "auth status" ]; then
+	signed_out
+fi
+
+case "$1 $2" in
+"auth status")
+	if [ "${FAKE_GH_AUTH:-ok}" = "fail" ]; then
+		echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2
+		exit 1
+	fi
+	echo "github.com"
+	echo "  ✓ Logged in to github.com account sam-rivera (fake)"
+	;;
+"pr view")
+	[ "$repo" = "acme/api" ] && [ "$number" = "42" ] || missing
+	cat <<'JSON'
+{
+  "title": "Add token bucket rate limiter",
+  "number": 42,
+  "state": "OPEN",
+  "isDraft": false,
+  "author": { "login": "sam-rivera" },
+  "headRefName": "sam/rate-limit",
+  "baseRefName": "main",
+  "mergeable": "MERGEABLE",
+  "mergeStateStatus": "BLOCKED",
+  "reviewDecision": "REVIEW_REQUIRED",
+  "url": "https://github.com/acme/api/pull/42",
+  "body": "## Summary\n\nAdds a token bucket rate limiter in front of the public API.\n\n- One bucket per API key, 100 requests per minute\n- Over the limit returns `429` with a `Retry-After` header\n- Limits are set with `RATE_LIMIT_*` environment variables\n\n## Testing\n\nUnit tests cover refill and burst behaviour. The load test is still running.",
+  "statusCheckRollup": [
+    { "__typename": "CheckRun", "name": "lint", "workflowName": "CI", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/1" },
+    { "__typename": "CheckRun", "name": "unit-tests", "workflowName": "CI", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/2" },
+    { "__typename": "CheckRun", "name": "integration-tests", "workflowName": "CI", "status": "IN_PROGRESS", "conclusion": "", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/3" },
+    { "__typename": "CheckRun", "name": "load-test", "workflowName": "CI", "status": "QUEUED", "conclusion": "", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/4" },
+    { "__typename": "CheckRun", "name": "build (linux)", "workflowName": "CI", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/5" },
+    { "__typename": "CheckRun", "name": "build (macos)", "workflowName": "CI", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "https://github.com/acme/api/actions/runs/1/job/6" },
+    { "__typename": "StatusContext", "context": "license/check", "state": "SUCCESS", "targetUrl": "https://example.com/license/42" }
+  ]
+}
+JSON
+	;;
+"api graphql")
+	owner=""
+	name=""
+	for arg in "$@"; do
+		case "$arg" in
+		o=*) owner="${arg#o=}" ;;
+		r=*) name="${arg#r=}" ;;
+		n=*) number="${arg#n=}" ;;
+		esac
+	done
+	[ "$owner/$name" = "acme/api" ] && [ "$number" = "42" ] || missing
+	echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"totalCount":2,"nodes":[{"isResolved":false},{"isResolved":true}]}}}}}'
+	;;
+"pr checks")
+	[ "$repo" = "acme/api" ] && [ "$number" = "42" ] || missing
+	case " $* " in
+	*" --watch "*)
+		while :; do
+			echo "Refreshing checks status every 10 seconds. Press Ctrl+C to quit."
+			sleep 10
+		done
+		;;
+	esac
+	printf 'build (macos)\tfail\t1m2s\thttps://github.com/acme/api/actions/runs/1/job/6\n'
+	printf 'integration-tests\tpending\t0\thttps://github.com/acme/api/actions/runs/1/job/3\n'
+	printf 'lint\tpass\t20s\thttps://github.com/acme/api/actions/runs/1/job/1\n'
+	exit 8
+	;;
+*)
+	echo "fake-gh: unsupported: $*" >&2
+	exit 2
+	;;
+esac
